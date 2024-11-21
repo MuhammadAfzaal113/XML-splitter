@@ -2,56 +2,63 @@ import xml.etree.ElementTree as ET
 import os
 
 
-def split_xml(input_file, output_dir, chunk_size=15):
+def split_xml(input_file, output_dir, chunk_size=1):
     """
-    Splits a large XML file into smaller chunks based on size.
+    Splits a large XML file into smaller chunks based on size and selects only the first 235 elements (columns) from each row.
 
     Args:
         input_file: Path to the input XML file.
         output_dir: Directory to store the output chunks.
-        chunk_size: Maximum size of each chunk in bytes (default: 15 MB).
+        chunk_size: Maximum size of each chunk in megabytes (default: 1 MB).
     """
-
     try:
-        tree = ET.parse(input_file)
-        root = tree.getroot()
-
-        # Create the output directory if it doesn't exist
         os.makedirs(output_dir, exist_ok=True)
+
         chunk_bytes = chunk_size * 1024 * 1024
-        tree = ET.parse(input_file)
-        root = tree.getroot()
-
-        current_chunk = ET.ElementTree(ET.Element(root.tag))
-        current_chunk_size = 0
-
         chunk_number = 1
+        current_chunk_size = 0
+        current_chunk = ET.Element("root")
         output_file = os.path.join(output_dir, f"chunk_{chunk_number}.xml")
 
-        for child in root:
-            child_size = len(ET.tostring(child))
-            if current_chunk_size + child_size > chunk_bytes:
-                print('Chunk created as chunk_' + str(chunk_number) + '.xml')
+        context = ET.iterparse(input_file, events=("start", "end"))
+        _, root = next(context)
 
-                current_chunk.write(output_file)
-                current_chunk = ET.ElementTree(ET.Element(root.tag))
-                current_chunk_size = 0
-                chunk_number += 1
-                output_file = os.path.join(output_dir, f"chunk_{chunk_number}.xml")
+        for event, elem in context:
+            if event == "end" and elem.tag != root.tag:
 
-            current_chunk.getroot().append(child)
-            current_chunk_size += child_size
+                trimmed_elem = ET.Element(elem.tag, attrib=elem.attrib)
+                trimmed_elem.extend(list(elem)[:235])  # Keep only the first 235 child elements
 
-        # Write the last chunk
-        current_chunk.write(output_file)
-        print('Chunk created as chunk_' + str(chunk_number) + '.xml')
+                element_size = len(ET.tostring(trimmed_elem, encoding="utf-8"))
+
+                if current_chunk_size + element_size > chunk_bytes:
+                    tree = ET.ElementTree(current_chunk)
+                    tree.write(output_file, encoding="utf-8", xml_declaration=True)
+                    print(f"Chunk created as chunk_{chunk_number}.xml")
+
+                    current_chunk = ET.Element("root")
+                    current_chunk_size = 0
+                    chunk_number += 1
+                    output_file = os.path.join(output_dir, f"chunk_{chunk_number}.xml")
+
+                current_chunk.append(trimmed_elem)
+                current_chunk_size += element_size
+
+                root.clear()
+
+        if len(current_chunk):
+            tree = ET.ElementTree(current_chunk)
+            tree.write(output_file, encoding="utf-8", xml_declaration=True)
+            print(f"Chunk created as chunk_{chunk_number}.xml")
 
     except FileNotFoundError as e:
         print(f"Error: {e}")
         print("Please ensure the input file exists and the output directory is accessible.")
+    except Exception as e:
+        print(f"An unexpected error occurred: {e}")
 
 
 if __name__ == '__main__':
-    input_file = "books.xml"
-    output_dir = "xml_chunks"
-    split_xml(input_file, output_dir, chunk_size=15)
+    input_file = "books.xml"  # Path to your large XML file
+    output_dir = "xml_chunks"  # Directory to save the chunks
+    split_xml(input_file, output_dir, chunk_size=1)  # Chunk size set to 1 MB
